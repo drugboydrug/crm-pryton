@@ -30,16 +30,16 @@ function Card({
   setDraftTitle,
   refreshTasks,
   deleteTask,
-  setLastAction,
+  statusColor,
 }: {
   task: Task
   editingId: string | null
   draftTitle: string
   setEditingId: (id: string | null) => void
   setDraftTitle: (title: string) => void
-  refreshTasks: () => void
+  refreshTasks: () => Promise<void>
   deleteTask: (id: string) => void
-  setLastAction: (action: string) => void
+  statusColor: { todo: string; in_progress: string; done: string }
 }) {
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: task.id,
@@ -50,15 +50,9 @@ function Card({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
+      className={`rounded-xl p-3 ${statusColor[task.status]}`}
       style={{
         transform: CSS.Translate.toString(transform),
-        padding: '12px 14px',
-        borderRadius: 14,
-        background: 'rgba(255,255,255,0.07)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        fontSize: 14,
-        lineHeight: 1.4,
-        boxShadow: '0 8px 20px rgba(0,0,0,0.35)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
@@ -77,8 +71,7 @@ function Card({
               .eq('id', task.id)
 
             setEditingId(null)
-            setLastAction('Renamed task')
-            refreshTasks()
+            await refreshTasks()
           }}
           onKeyDown={async (e) => {
             if (e.key === 'Enter') {
@@ -88,8 +81,7 @@ function Card({
                 .eq('id', task.id)
 
               setEditingId(null)
-              setLastAction('Renamed task')
-              refreshTasks()
+              await refreshTasks()
             }
           }}
           style={{
@@ -134,7 +126,6 @@ function Card({
 }
 
 function Column({
-  title,
   status,
   tasks,
   editingId,
@@ -143,34 +134,22 @@ function Column({
   setDraftTitle,
   refreshTasks,
   deleteTask,
-  setLastAction,
+  statusColor,
 }: {
-  title: string
   status: Status
   tasks: Task[]
   editingId: string | null
   draftTitle: string
   setEditingId: (id: string | null) => void
   setDraftTitle: (title: string) => void
-  refreshTasks: () => void
+  refreshTasks: () => Promise<void>
   deleteTask: (id: string) => void
-  setLastAction: (action: string) => void
+  statusColor: { todo: string; in_progress: string; done: string }
 }) {
   const { setNodeRef } = useDroppable({ id: status })
 
   return (
     <div style={{ flex: 1 }}>
-      <div
-        style={{
-          fontSize: 12,
-          letterSpacing: 1,
-          opacity: 0.5,
-          marginBottom: 12,
-          textTransform: 'uppercase',
-        }}
-      >
-        {title}
-      </div>
       <div
         ref={setNodeRef}
         style={{
@@ -196,7 +175,7 @@ function Column({
             setDraftTitle={setDraftTitle}
             refreshTasks={refreshTasks}
             deleteTask={deleteTask}
-            setLastAction={setLastAction}
+            statusColor={statusColor}
           />
         ))}
       </div>
@@ -209,7 +188,6 @@ export default function DashboardPage() {
   const [newTask, setNewTask] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draftTitle, setDraftTitle] = useState('')
-  const [lastAction, setLastAction] = useState<string | null>(null)
 
   useEffect(() => {
     fetchTasks()
@@ -241,14 +219,14 @@ export default function DashboardPage() {
     setTasks(data || [])
   }
 
-  function refreshTasks() {
-    fetchTasks()
+  async function refreshTasks() {
+    await fetchTasks()
   }
 
   async function addTask() {
     if (!newTask.trim()) return
 
-    const { data } = await supabase
+    await supabase
       .from('tasks')
       .insert({
         title: newTask,
@@ -257,11 +235,8 @@ export default function DashboardPage() {
       .select()
       .single()
 
-    if (data) {
-      setTasks((prev) => [data, ...prev])
-      setLastAction(`Created task "${newTask}"`)
-      setNewTask('')
-    }
+    setNewTask('')
+    await refreshTasks()
   }
 
   async function deleteTask(id: string) {
@@ -271,22 +246,27 @@ export default function DashboardPage() {
       body: JSON.stringify({ id }),
     })
 
-    refreshTasks()
+    await refreshTasks()
   }
 
-  async function onDragEnd(e: DragEndEvent) {
-    const { active, over } = e
+  const onDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
     if (!over) return
 
-    const id = active.id as string
-    const status = over.id as 'todo' | 'in_progress' | 'done'
+    const newStatus = over.id as Status
 
-    setTasks((t) =>
-      t.map((x) => (x.id === id ? { ...x, status } : x))
-    )
+    await supabase
+      .from('tasks')
+      .update({ status: newStatus })
+      .eq('id', active.id)
 
-    await supabase.from('tasks').update({ status }).eq('id', id)
-    setLastAction(`Moved task to ${status}`)
+    await refreshTasks()
+  }
+
+  const statusColor = {
+    todo: 'bg-white/10',
+    in_progress: 'bg-yellow-500/10',
+    done: 'bg-green-500/10',
   }
 
   const tasksByStatus = {
@@ -304,16 +284,14 @@ export default function DashboardPage() {
           padding: '0 32px',
         }}
       >
-        <h1
-          style={{
-            fontSize: 26,
-            fontWeight: 500,
-            marginBottom: 32,
-            letterSpacing: -0.3,
-          }}
-        >
-          Kanban
-        </h1>
+        <div style={{ marginBottom: 32 }}>
+          <h1 className="text-3xl font-medium tracking-tight">
+            Pryton
+          </h1>
+          <p className="text-sm text-white/50">
+            Internal Kanban
+          </p>
+        </div>
 
         <div
           style={{
@@ -343,7 +321,6 @@ export default function DashboardPage() {
 
         <div style={{ display: 'flex', gap: 24, marginTop: 24 }}>
           <Column
-            title="To do"
             status="todo"
             tasks={tasksByStatus.todo}
             editingId={editingId}
@@ -352,10 +329,9 @@ export default function DashboardPage() {
             setDraftTitle={setDraftTitle}
             refreshTasks={refreshTasks}
             deleteTask={deleteTask}
-            setLastAction={setLastAction}
+            statusColor={statusColor}
           />
           <Column
-            title="In progress"
             status="in_progress"
             tasks={tasksByStatus.in_progress}
             editingId={editingId}
@@ -364,10 +340,9 @@ export default function DashboardPage() {
             setDraftTitle={setDraftTitle}
             refreshTasks={refreshTasks}
             deleteTask={deleteTask}
-            setLastAction={setLastAction}
+            statusColor={statusColor}
           />
           <Column
-            title="Done"
             status="done"
             tasks={tasksByStatus.done}
             editingId={editingId}
@@ -376,23 +351,11 @@ export default function DashboardPage() {
             setDraftTitle={setDraftTitle}
             refreshTasks={refreshTasks}
             deleteTask={deleteTask}
-            setLastAction={setLastAction}
+            statusColor={statusColor}
           />
         </div>
 
       </div>
-
-      {lastAction && (
-        <div
-          style={{
-            marginTop: 24,
-            fontSize: 12,
-            opacity: 0.35,
-          }}
-        >
-          Last action: {lastAction}
-        </div>
-      )}
     </DndContext>
   )
 }

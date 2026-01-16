@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { COMMANDS } from '@/lib/commands'
+import { COMMANDS, Command } from '@/lib/commands'
 
 export function CommandPalette({
   onRun,
